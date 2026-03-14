@@ -308,7 +308,29 @@ body{font-family:var(--f);background:var(--bg);color:var(--ink);font-size:15px;l
 /* ── Section divider ── */
 .sec-div{font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--ink3);margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center}
 
-@keyframes fu{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+/* ── Google sync button ── */
+.gsync-btn{
+  display:inline-flex;align-items:center;gap:7px;
+  padding:6px 12px;border-radius:var(--rsm);font-size:12px;font-weight:500;
+  border:1.5px solid var(--line);background:var(--surface);color:var(--ink2);
+  cursor:pointer;transition:all var(--tr);font-family:var(--f);white-space:nowrap;
+}
+.gsync-btn:active{background:var(--surface2)}
+.gsync-btn.signed-in{border-color:var(--green-line);background:var(--green-bg);color:var(--green)}
+.gsync-btn.syncing{border-color:var(--amber-bg);background:var(--amber-bg);color:var(--amber)}
+.gsync-btn svg{width:14px;height:14px;flex-shrink:0}
+.gsync-avatar{width:20px;height:20px;border-radius:50%;object-fit:cover;flex-shrink:0}
+
+/* ── Sync setup sheet ── */
+.setup-step{display:flex;gap:11px;align-items:flex-start;margin-bottom:16px}
+.setup-num{width:22px;height:22px;border-radius:50%;background:var(--ink);color:white;font-size:11px;font-weight:600;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px}
+.setup-t{font-size:13px;font-weight:600;color:var(--ink);margin-bottom:3px}
+.setup-s{font-size:12px;color:var(--ink3);line-height:1.6}
+.setup-s a{color:var(--blue);text-decoration:none}
+.setup-s code{font-family:var(--fm);font-size:11px;background:var(--surface2);padding:2px 5px;border-radius:4px}
+
+@keyframes spin{to{transform:rotate(360deg)}}
+.spinning{animation:spin 1s linear infinite}
 .page.on .sc{animation:fu .22s ease both}
 .page.on .sc:nth-child(2){animation-delay:.05s}
 .page.on .sc:nth-child(3){animation-delay:.1s}
@@ -325,9 +347,15 @@ body{font-family:var(--f);background:var(--bg);color:var(--ink);font-size:15px;l
       <div class="wm-m"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div>
       DocVault
     </div>
-    <button class="bar-add" onclick="openAdd()" aria-label="Add document">
-      <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-    </button>
+    <div style="display:flex;align-items:center;gap:8px">
+      <button class="gsync-btn" id="gsync-btn" onclick="openSyncSheet()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" id="gsync-icon"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        <span id="gsync-label">Backup</span>
+      </button>
+      <button class="bar-add" onclick="openAdd()" aria-label="Add document">
+        <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      </button>
+    </div>
   </header>
 
   <!-- Stage -->
@@ -480,6 +508,22 @@ body{font-family:var(--f);background:var(--bg);color:var(--ink);font-size:15px;l
   </div>
 </div>
 
+<!-- ── Backup Sheet ── -->
+<div class="overlay" id="sync-ov">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <div class="mh">
+      <div class="mh-t">Backup & Restore</div>
+      <button class="mhc" onclick="closeSyncSheet()"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+    </div>
+    <div class="mb" id="sync-sheet-body"></div>
+    <div class="mf" id="sync-sheet-footer"></div>
+  </div>
+</div>
+
+<!-- hidden file input for import -->
+<input type="file" id="import-file" accept=".json" style="display:none" onchange="handleImport(event)">
+
 <div class="toast" id="toast"></div>
 
 <script>
@@ -573,9 +617,9 @@ const ICONS={
 let docs=JSON.parse(localStorage.getItem('dv3b_docs')||'[]');
 let editId=null,step=1,selType=null,activeCat='All',curPage=0;
 
-const save=()=>localStorage.setItem('dv3b_docs',JSON.stringify(docs));
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2);
 const today=()=>new Date().toISOString().split('T')[0];
+const san=(s)=>String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 
 function days(ds){
   if(!ds)return null;
@@ -641,11 +685,11 @@ function tlRow(d){
   const ty=typeOf(d.type);
   const{t,c}=expText(d);const st=statusOf(d);
   const col=c==='r'?'var(--red)':c==='a'?'var(--amber)':c==='g'?'var(--green)':'var(--ink3)';
-  return`<div class="tl-i" onclick="viewDoc('${d.id}')">
+  return`<div class="tl-i" onclick="viewDoc('${san(d.id)}')">
     <div class="tl-dot ${st}"></div>
     <div class="tl-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${icoOf(d.category||ty.c)}</svg></div>
-    <div class="tl-info"><div class="tl-name">${d.name}</div><div class="tl-sub">${d.holder?d.holder+' · ':''}${ty.l}</div></div>
-    <div class="tl-r"><div class="tl-date" style="color:${col}">${t}</div></div>
+    <div class="tl-info"><div class="tl-name">${san(d.name)}</div><div class="tl-sub">${d.holder?san(d.holder)+' · ':''}${san(ty.l)}</div></div>
+    <div class="tl-r"><div class="tl-date" style="color:${col}">${san(t)}</div></div>
   </div>`;
 }
 
@@ -684,26 +728,26 @@ function docCard(d){
   const hasLink=!!d.link;
   return`<div class="dc">
     <div class="dc-stripe ${st}"></div>
-    <div class="dc-inner" onclick="viewDoc('${d.id}')">
+    <div class="dc-inner" onclick="viewDoc('${san(d.id)}')">
       <div class="dc-head">
         <div class="dc-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${icoOf(d.category||ty.c)}</svg></div>
         <div class="dc-meta">
-          <div class="dc-name">${d.name}</div>
-          <div class="dc-type">${(d.category||ty.c)} · ${ty.l}</div>
+          <div class="dc-name">${san(d.name)}</div>
+          <div class="dc-type">${san(d.category||ty.c)} · ${san(ty.l)}</div>
         </div>
         <div class="dc-menu" onclick="event.stopPropagation()">
-          <button class="dc-mb" onclick="toggleDrop('dm-${d.id}')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg></button>
-          <div class="drop" id="dm-${d.id}">
-            <div class="di" onclick="editDoc('${d.id}')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>Edit</div>
-            <div class="di rd" onclick="delDoc('${d.id}')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/></svg>Delete</div>
+          <button class="dc-mb" onclick="toggleDrop('dm-${san(d.id)}')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/></svg></button>
+          <div class="drop" id="dm-${san(d.id)}">
+            <div class="di" onclick="editDoc('${san(d.id)}')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>Edit</div>
+            <div class="di rd" onclick="delDoc('${san(d.id)}')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/></svg>Delete</div>
           </div>
         </div>
       </div>
-      ${d.holder?`<div class="dc-row"><div class="dc-holder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>${d.holder}</div></div>`:''}
-      ${d.number?`<div class="dc-num">•••• ${d.number.slice(-4)}</div>`:''}
+      ${d.holder?`<div class="dc-row"><div class="dc-holder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>${san(d.holder)}</div></div>`:''}
+      ${d.number?`<div class="dc-num">•••• ${san(d.number.slice(-4))}</div>`:''}
       <div class="dc-footer">
-        <span class="pill ${c}"><span class="pd ${c}"></span>${t}</span>
-        ${hasLink?`<a class="view-link-btn" href="${d.link}" target="_blank" rel="noopener" onclick="event.stopPropagation()"><svg viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>View Doc</a>`:''}
+        <span class="pill ${c}"><span class="pd ${c}"></span>${san(t)}</span>
+        ${hasLink?`<a class="view-link-btn" href="${san(d.link)}" target="_blank" rel="noopener" onclick="event.stopPropagation()"><svg viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>View Doc</a>`:''}
       </div>
     </div>
   </div>`;
@@ -792,26 +836,26 @@ function viewDoc(id){
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;stroke:var(--ink2)">${icoOf(d.category||ty.c)}</svg>
       </div>
       <div style="min-width:0">
-        <div class="mh-t" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${d.name}</div>
-        <div style="font-size:10px;color:var(--ink3);font-weight:600;letter-spacing:.06em;text-transform:uppercase;margin-top:1px">${(d.category||ty.c)} · ${ty.l}</div>
+        <div class="mh-t" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${san(d.name)}</div>
+        <div style="font-size:10px;color:var(--ink3);font-weight:600;letter-spacing:.06em;text-transform:uppercase;margin-top:1px">${san(d.category||ty.c)} · ${san(ty.l)}</div>
       </div>
     </div>
     <button class="mhc" onclick="closeView()" style="flex-shrink:0"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>`;
 
-  let body=`<div style="margin-bottom:14px"><span class="pill ${c}"><span class="pd ${c}"></span>${t}</span></div>`;
+  let body=`<div style="margin-bottom:14px"><span class="pill ${c}"><span class="pd ${c}"></span>${san(t)}</span></div>`;
 
   // Linked doc row (prominent)
   if(d.link){
-    body+=`<a class="link-row" href="${d.link}" target="_blank" rel="noopener">
+    body+=`<a class="link-row" href="${san(d.link)}" target="_blank" rel="noopener">
       <div class="link-row-icon"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div>
-      <div class="link-row-text"><div class="link-row-label">View Document</div><div class="link-row-url">${d.link}</div></div>
+      <div class="link-row-text"><div class="link-row-label">View Document</div><div class="link-row-url">${san(d.link)}</div></div>
       <div class="link-row-arrow"><svg viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></div>
     </a>`;
   }
 
   body+=`<div class="vfg">`;
-  if(d.holder)body+=vf('Holder',d.holder);
-  if(d.number)body+=vf('Number',d.number,true);
+  if(d.holder)body+=vf('Holder',san(d.holder));
+  if(d.number)body+=vf('Number',san(d.number),true);
   if(d.issue)body+=vf('Issue Date',fd(d.issue));
   if(d.expiry)body+=vf('Expiry Date',fd(d.expiry));
   body+='</div>';
@@ -821,14 +865,14 @@ function viewDoc(id){
     body+=`<div style="border-top:1px solid var(--line);padding-top:14px;margin-top:2px;margin-bottom:14px">
       <div style="font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--ink3);margin-bottom:12px">Type Details</div>
       <div class="vfg">`;
-    extras.forEach(([k,v])=>{const def=FD[k];body+=vf(def?.l||k,v);});
+    extras.forEach(([k,v])=>{const def=FD[k];body+=vf(def?.l||k,san(v));});
     body+='</div></div>';
   }
 
   if(d.notes){
     body+=`<div style="border-top:1px solid var(--line);padding-top:13px">
       <div style="font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--ink3);margin-bottom:7px">Notes</div>
-      <div style="font-size:14px;color:var(--ink2);line-height:1.7">${d.notes}</div>
+      <div style="font-size:14px;color:var(--ink2);line-height:1.7">${san(d.notes)}</div>
     </div>`;
   }
   body+=`<div style="font-size:11px;color:var(--ink4);margin-top:14px;border-top:1px solid var(--line);padding-top:10px">Added ${fd(d.addedOn)}</div>`;
@@ -977,50 +1021,186 @@ function closeAdd(){document.getElementById('add-ov').classList.remove('on');cle
   });
 });
 
-// ── Seed ───────────────────────────────────────────────────────────
-function seed(){
-  const f=d=>{const x=new Date();x.setDate(x.getDate()+d);return x.toISOString().split('T')[0];};
-  const p=d=>{const x=new Date();x.setDate(x.getDate()-d);return x.toISOString().split('T')[0];};
-  docs=[
-    {id:uid(),type:'passport',category:'Identity',name:'Indian Passport',number:'Z1234567',holder:'Raj Sharma',issue:p(1200),expiry:f(48),extra:{nationality:'Indian',place_of_issue:'Mumbai'},link:'https://drive.google.com/file/example-passport',notes:'Renew before expiry — apply 6 months early.',addedOn:p(10)},
-    {id:uid(),type:'aadhar',category:'Identity',name:'Aadhaar Card',number:'9876 5432 1011',holder:'Raj Sharma',extra:{dob:'1990-04-15',linked_mobile:'9876543210'},addedOn:p(20)},
-    {id:uid(),type:'pan',category:'Identity',name:'PAN Card',number:'ABCDE1234F',holder:'Raj Sharma',extra:{dob:'1990-04-15',father_name:'Mohan Sharma'},addedOn:p(20)},
-    {id:uid(),type:'voter',category:'Identity',name:'Voter ID (EPIC)',number:'GJ/04/123/456',holder:'Raj Sharma',extra:{dob:'1990-04-15',constituency:'Vadodara East'},addedOn:p(18)},
-    {id:uid(),type:'dl',category:'Identity',name:"Driver's Licence",number:'GJ17 20190012',holder:'Raj Sharma',issue:p(1800),expiry:f(730),extra:{vehicle_class:'LMV, MCWG',dob:'1990-04-15',blood_group:'B+'},addedOn:p(15)},
-    {id:uid(),type:'ration',category:'Identity',name:'Ration Card',number:'GJ-040-XXXXX',holder:'Raj Sharma',extra:{category:'APL',family_members:'4'},addedOn:p(30)},
-    {id:uid(),type:'passport',category:'Identity',name:'Indian Passport',number:'A9876543',holder:'Priya Sharma',issue:p(400),expiry:f(3000),extra:{nationality:'Indian',place_of_issue:'Ahmedabad'},addedOn:p(3)},
-    {id:uid(),type:'aadhar',category:'Identity',name:'Aadhaar Card',number:'1234 5678 9012',holder:'Priya Sharma',extra:{dob:'1993-08-22'},addedOn:p(4)},
-    {id:uid(),type:'credit_card',category:'Financial',name:'HDFC Regalia',number:'4242424242421234',holder:'Raj Sharma',expiry:f(540),extra:{bank_name:'HDFC Bank',card_network:'Visa',credit_limit:'500000',billing_cycle:'15',reward_type:'Reward Points'},addedOn:p(5)},
-    {id:uid(),type:'credit_card',category:'Financial',name:'SBI SimplyCLICK',number:'5111111111111234',holder:'Raj Sharma',expiry:f(720),extra:{bank_name:'SBI',card_network:'Mastercard',credit_limit:'150000',reward_type:'Amazon Points'},addedOn:p(6)},
-    {id:uid(),type:'debit_card',category:'Financial',name:'HDFC Debit Card',number:'4111111111111234',holder:'Raj Sharma',expiry:f(400),extra:{bank_name:'HDFC Bank',card_network:'Visa',account_number:'XXXX1234'},addedOn:p(7)},
-    {id:uid(),type:'bank_account',category:'Financial',name:'HDFC Savings Account',number:'12345678901',holder:'Raj Sharma',extra:{bank_name:'HDFC Bank',ifsc:'HDFC0001234',account_type:'Savings',branch:'Vadodara Main'},addedOn:p(8)},
-    {id:uid(),type:'ins_health',category:'Financial',name:'Star Health — Family Floater',number:'P/211234/01',holder:'Raj Sharma',expiry:f(200),extra:{insurer:'Star Health',sum_insured:'1000000',premium:'25000',nominee:'Priya Sharma'},addedOn:p(9)},
-    {id:uid(),type:'ins_life',category:'Financial',name:'LIC Jeevan Anand',number:'521234567',holder:'Raj Sharma',expiry:f(5400),extra:{insurer:'LIC of India',sum_assured:'2500000',premium:'35000',nominee:'Priya Sharma'},addedOn:p(11)},
-    {id:uid(),type:'epf',category:'Financial',name:'EPF / UAN Account',number:'100123456789',holder:'Raj Sharma',extra:{uan_no:'100123456789',epf_no:'GJ/VDR/123456',employer_name:'ABC Technologies Pvt Ltd'},addedOn:p(12)},
-    {id:uid(),type:'ppf',category:'Financial',name:'PPF Account — SBI',holder:'Raj Sharma',expiry:f(2920),extra:{bank_name:'State Bank of India',account_number:'PPFXXXX1234'},addedOn:p(14)},
-    {id:uid(),type:'form16',category:'Financial',name:'Form 16 / ITR AY2024-25',holder:'Raj Sharma',extra:{ay_year:'2024-25',employer_name:'ABC Technologies Pvt Ltd',gross_income:'1200000'},link:'https://drive.google.com/file/example-form16',addedOn:p(60)},
-    {id:uid(),type:'rc',category:'Vehicle',name:'Maruti Swift RC',number:'GJ06AB1234',holder:'Raj Sharma',expiry:f(-30),extra:{vehicle_number:'GJ06AB1234',make_model:'Maruti Suzuki Swift VXi',fuel_type:'Petrol',color:'Pearl White'},addedOn:p(30)},
-    {id:uid(),type:'puc',category:'Vehicle',name:'PUC Certificate — Swift',number:'PUC2024XXXXX',holder:'Raj Sharma',expiry:f(55),extra:{vehicle_number:'GJ06AB1234',test_centre:'RTO Vadodara'},addedOn:p(25)},
-    {id:uid(),type:'veh_ins',category:'Vehicle',name:'Car Insurance — Swift',number:'3379/12345678',holder:'Raj Sharma',expiry:f(70),extra:{vehicle_number:'GJ06AB1234',insurer:'Bajaj Allianz',policy_type:'Comprehensive',idv:'650000'},addedOn:p(20)},
-    {id:uid(),type:'fastag',category:'Vehicle',name:'FASTag — Swift',holder:'Raj Sharma',extra:{vehicle_number:'GJ06AB1234',bank_name:'HDFC Bank'},addedOn:p(22)},
-    {id:uid(),type:'vaccine',category:'Medical',name:'COVID Vaccine Certificate',holder:'Raj Sharma',extra:{vaccine_name:'Covishield',dose_no:'Booster',hospital:'GMERS Gotri'},link:'https://cowin.gov.in/certificate/example',addedOn:p(400)},
-    {id:uid(),type:'vaccine',category:'Medical',name:'COVID Vaccine Certificate',holder:'Priya Sharma',extra:{vaccine_name:'Covaxin',dose_no:'2nd',hospital:'SSG Hospital Vadodara'},addedOn:p(380)},
-    {id:uid(),type:'property_deed',category:'Property',name:'Flat Sale Deed — Alkapuri',number:'SR/VDR/2019/456',holder:'Raj Sharma',extra:{property_address:'B-202, Sun Residency, Alkapuri, Vadodara',survey_no:'TP-12 FP-234',area:'1100 sq ft'},addedOn:p(1500)},
-    {id:uid(),type:'rent_agr',category:'Property',name:'Rental Agreement — Office',number:'NOTARIZED-2024',holder:'Raj Sharma',expiry:f(180),extra:{landlord:'Ramesh Patel',monthly_rent:'25000',deposit:'75000'},link:'https://drive.google.com/file/example-rent',addedOn:p(185)},
-    {id:uid(),type:'utility',category:'Property',name:'Electricity Connection — MGVCL',number:'MGVCL-123456789',holder:'Raj Sharma',extra:{utility_type:'Electricity',consumer_no:'123456789',utility_provider:'MGVCL'},addedOn:p(500)},
-    {id:uid(),type:'lpg',category:'Property',name:'LPG Connection — HPCL',number:'LPG-HPCL-XXXXX',holder:'Raj Sharma',extra:{consumer_no:'HPCL12345678',gas_agency:'Vadodara HP Gas',cylinder_type:'14.2 kg',subsidy_link:'Yes'},addedOn:p(600)},
-    {id:uid(),type:'marksheet',category:'Education',name:'SSC Marksheet (10th)',holder:'Raj Sharma',extra:{institution:'GSEB',exam_name:'SSC 2006',percentage:'87',roll_no:'GJ2006XXXXX'},link:'https://drive.google.com/file/example-ssc',addedOn:p(800)},
-    {id:uid(),type:'marksheet',category:'Education',name:'HSC Marksheet (12th)',holder:'Raj Sharma',extra:{institution:'GSEB',exam_name:'HSC 2008',percentage:'82',roll_no:'GJ2008XXXXX'},link:'https://drive.google.com/file/example-hsc',addedOn:p(780)},
-    {id:uid(),type:'degree',category:'Education',name:'B.Tech Degree Certificate',holder:'Raj Sharma',extra:{institution:'M.S. University, Vadodara',course:'B.Tech Civil Engineering',grade:'7.8 CGPA',roll_no:'12CL001'},link:'https://drive.google.com/file/example-degree',addedOn:p(760)},
-    {id:uid(),type:'employee_id',category:'Legal',name:'Employee ID — ABC Tech',number:'EMP-1042',holder:'Raj Sharma',extra:{employer_name:'ABC Technologies Pvt Ltd',emp_id:'EMP-1042',department:'Civil & Contracts'},addedOn:p(700)},
-  ];
-  save();
+// ── Export / Import Backup ─────────────────────────────────────────
+const save = ()=>localStorage.setItem('dv3b_docs', JSON.stringify(docs));
+
+function exportBackup(){
+  localStorage.setItem('dv_last_export', new Date().toISOString());
+  const data = JSON.stringify({ version:4, exported: new Date().toISOString(), docs }, null, 2);
+  const blob = new Blob([data], { type:'application/json' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  const date = new Date().toISOString().split('T')[0];
+  a.href = url;
+  a.download = `docvault-backup-${date}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  updateSyncBtn();
+  toast(`Exported ${docs.length} documents ✓`);
+  closeSyncSheet();
+}
+
+function triggerImport(){
+  document.getElementById('import-file').value = '';
+  document.getElementById('import-file').click();
+}
+
+function handleImport(e){
+  const file = e.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = ev => {
+    try {
+      const data = JSON.parse(ev.target.result);
+      if(!data.docs || !Array.isArray(data.docs)) throw new Error('Invalid file');
+      const count = data.docs.length;
+      if(!confirm(`This will replace your ${docs.length} current document${docs.length!==1?'s':''} with ${count} from the backup.\n\nContinue?`)) return;
+      docs = data.docs;
+      save();
+      renderDash(); renderAll();
+      closeSyncSheet();
+      toast(`Restored ${count} document${count!==1?'s':''} ✓`);
+    } catch(err){
+      toast('Invalid backup file');
+    }
+  };
+  reader.readAsText(file);
+}
+
+// ── Backup Sheet UI ────────────────────────────────────────────────
+function openSyncSheet(){
+  const lastExport = localStorage.getItem('dv_last_export');
+  document.getElementById('sync-sheet-body').innerHTML=`
+    <div style="display:flex;flex-direction:column;gap:12px;margin-bottom:4px">
+
+      <div style="background:var(--surface2);border-radius:var(--rlg);padding:18px 18px 14px;border:1px solid var(--line)">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+          <div style="width:36px;height:36px;background:var(--ink);border-radius:9px;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          </div>
+          <div>
+            <div style="font-size:14px;font-weight:600;color:var(--ink)">Export Backup</div>
+            <div style="font-size:12px;color:var(--ink3);margin-top:1px">Download all your documents as a file</div>
+          </div>
+        </div>
+        <div style="font-size:12px;color:var(--ink3);line-height:1.7;margin-bottom:12px">
+          Downloads <code style="font-family:var(--fm);font-size:11px;background:var(--surface);padding:2px 5px;border-radius:4px">docvault-backup.json</code> to your device. Save it to Google Drive, WhatsApp Saved Messages, or email it to yourself — then you can restore from any device.
+        </div>
+        ${lastExport ? `<div style="font-size:11px;color:var(--ink3);margin-bottom:10px">Last exported: ${new Date(lastExport).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'})}</div>` : ''}
+        <button class="btn btn-dk btn-sm" style="width:100%;justify-content:center" onclick="exportBackup()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Export ${docs.length} Document${docs.length!==1?'s':''}
+        </button>
+      </div>
+
+      <div style="background:var(--surface2);border-radius:var(--rlg);padding:18px 18px 14px;border:1px solid var(--line)">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+          <div style="width:36px;height:36px;background:var(--blue);border-radius:9px;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          </div>
+          <div>
+            <div style="font-size:14px;font-weight:600;color:var(--ink)">Restore from Backup</div>
+            <div style="font-size:12px;color:var(--ink3);margin-top:1px">Import a previously exported file</div>
+          </div>
+        </div>
+        <div style="font-size:12px;color:var(--ink3);line-height:1.7;margin-bottom:12px">
+          Pick your backup file from wherever you saved it. This will replace your current data with the backup — make sure to export first if you have new documents.
+        </div>
+        <button class="btn btn-ghost btn-sm" style="width:100%;justify-content:center;background:var(--surface);border-color:var(--line2)" onclick="triggerImport()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          Choose Backup File
+        </button>
+      </div>
+
+      <div style="background:var(--amber-bg);border-radius:var(--r);padding:11px 13px;font-size:12px;color:var(--amber);line-height:1.7">
+        💡 <strong>Tip:</strong> Export after every session and save to Google Drive or WhatsApp Saved Messages. That way your backup is always one tap away on any device.
+      </div>
+
+    </div>`;
+  document.getElementById('sync-sheet-footer').innerHTML=`
+    <button class="btn btn-gh btn-sm" onclick="closeSyncSheet()">Close</button>`;
+  document.getElementById('sync-ov').classList.add('on');
+}
+
+function closeSyncSheet(){ document.getElementById('sync-ov').classList.remove('on'); }
+
+document.getElementById('sync-ov').addEventListener('click', e=>{
+  if(e.target===e.currentTarget) closeSyncSheet();
+});
+
+// ── Update backup button appearance ───────────────────────────────
+function updateSyncBtn(){
+  const btn = document.getElementById('gsync-btn');
+  if(!btn) return;
+  const last = localStorage.getItem('dv_last_export');
+  if(last){
+    const diffDays = Math.floor((Date.now()-new Date(last))/86400000);
+    if(diffDays > 7){
+      btn.className='gsync-btn';
+      btn.style.cssText='border-color:var(--amber-line);background:var(--amber-bg);color:var(--amber)';
+      btn.innerHTML=`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span>Backup!</span>`;
+    } else {
+      btn.className='gsync-btn signed-in';
+      btn.style.cssText='';
+      btn.innerHTML=`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span>Backed up</span>`;
+    }
+  }
+}
+updateSyncBtn();
+
+
+
+// ── Welcome screen (first-time only) ──────────────────────────────
+function showWelcome(){
+  const ov=document.createElement('div');
+  ov.id='welcome-ov';
+  ov.style.cssText='position:fixed;inset:0;background:var(--bg);z-index:600;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:32px 24px;text-align:center';
+  ov.innerHTML=`
+    <div style="width:64px;height:64px;background:var(--ink);border-radius:16px;display:flex;align-items:center;justify-content:center;margin-bottom:24px;flex-shrink:0">
+      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+    </div>
+    <div style="font-size:26px;font-weight:600;letter-spacing:-.04em;color:var(--ink);margin-bottom:10px">Welcome to DocVault</div>
+    <div style="font-size:15px;color:var(--ink3);line-height:1.7;max-width:300px;margin-bottom:10px">
+      Your personal document manager — all your IDs, cards, insurance, and more in one private place.
+    </div>
+    <div style="display:flex;flex-direction:column;gap:10px;width:100%;max-width:320px;margin:24px 0 0">
+      <div style="display:flex;align-items:flex-start;gap:12px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:14px 16px;text-align:left">
+        <div style="width:32px;height:32px;background:var(--surface2);border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--ink2)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
+        </div>
+        <div><div style="font-size:13px;font-weight:600;color:var(--ink)">All docs in one place</div><div style="font-size:12px;color:var(--ink3);margin-top:2px">Passports, Aadhaar, cards, insurance, vehicle, and more</div></div>
+      </div>
+      <div style="display:flex;align-items:flex-start;gap:12px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:14px 16px;text-align:left">
+        <div style="width:32px;height:32px;background:var(--surface2);border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--ink2)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        </div>
+        <div><div style="font-size:13px;font-weight:600;color:var(--ink)">Expiry alerts</div><div style="font-size:12px;color:var(--ink3);margin-top:2px">Never miss a renewal — see what's expiring at a glance</div></div>
+      </div>
+      <div style="display:flex;align-items:flex-start;gap:12px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:14px 16px;text-align:left">
+        <div style="width:32px;height:32px;background:var(--surface2);border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--ink2)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        </div>
+        <div><div style="font-size:13px;font-weight:600;color:var(--ink)">Stays on your device</div><div style="font-size:12px;color:var(--ink3);margin-top:2px">Data is stored only in your browser — private by default</div></div>
+      </div>
+    </div>
+    <button onclick="dismissWelcome()" style="margin-top:28px;width:100%;max-width:320px;padding:14px;background:var(--ink);color:white;border:none;border-radius:var(--rsm);font-family:var(--f);font-size:15px;font-weight:600;cursor:pointer;letter-spacing:-.01em">
+      Get Started →
+    </button>
+  `;
+  document.body.appendChild(ov);
+}
+
+function dismissWelcome(){
+  localStorage.setItem('dv3b_welcomed','1');
+  const ov=document.getElementById('welcome-ov');
+  if(ov){ov.style.transition='opacity .3s';ov.style.opacity='0';setTimeout(()=>ov.remove(),300);}
 }
 
 // ── Init ───────────────────────────────────────────────────────────
-if(docs.length===0)seed();
+// Clear any old seed data from previous versions
+['dv2_docs','dv3_docs','dv2_gd_key','dv2_gd_folder'].forEach(k=>localStorage.removeItem(k));
 renderDash();renderAll();
-
+if(!localStorage.getItem('dv3b_welcomed'))showWelcome();
 // PWA manifest
 const mf={name:'DocVault',short_name:'DocVault',start_url:'.',display:'standalone',background_color:'#f5f5f3',theme_color:'#0a0a0a',icons:[{src:"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%230a0a0a' rx='18'/%3E%3Cpath d='M30 22h26l14 14v42a4 4 0 01-4 4H30a4 4 0 01-4-4V26a4 4 0 014-4z' fill='white'/%3E%3Cpath d='M56 22v14h14' fill='none' stroke='%230a0a0a' stroke-width='2'/%3E%3C/svg%3E",sizes:'192x192',type:'image/svg+xml'}]};
 const bl=new Blob([JSON.stringify(mf)],{type:'application/json'});
